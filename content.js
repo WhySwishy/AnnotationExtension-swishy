@@ -266,12 +266,12 @@
 
             // Don't create note if clicking on an existing note overlay
             const clickedElement = e.target;
-            if (clickedElement.closest && clickedElement.closest('.note-overlay-host')) {
+            if (clickedElement.closest && clickedElement.closest('.note-overlay-host, .annotation-fab-host')) {
                 return;
             }
             if (clickedElement.shadowRoot || clickedElement.getRootNode().host) {
                 const host = clickedElement.getRootNode().host;
-                if (host && host.classList && host.classList.contains('note-overlay-host')) {
+                if (host && host.classList && (host.classList.contains('note-overlay-host') || host.classList.contains('annotation-fab-host'))) {
                     return;
                 }
             }
@@ -816,12 +816,6 @@
         }
     }
 
-    // Mouse position tracking
-    let lastMousePosition = { x: 0, y: 0 };
-    document.addEventListener('mousemove', (e) => {
-        lastMousePosition = { x: e.clientX, y: e.clientY };
-    });
-
     // HighlightManager class
     class HighlightManager {
         constructor() {
@@ -924,7 +918,12 @@
             document.body.style.cursor = 'crosshair';
 
             const onMouseDown = (e) => {
-                if (e.target.closest('.toolbox-container') || e.target.closest('.note-overlay-host')) {
+                const target = e.target;
+                if (target.closest('.annotation-fab-host') || target.closest('.note-overlay-host')) {
+                    return;
+                }
+                const host = target.getRootNode && target.getRootNode().host;
+                if (host && host.classList && (host.classList.contains('annotation-fab-host') || host.classList.contains('note-overlay-host'))) {
                     return;
                 }
 
@@ -1154,269 +1153,231 @@
         }
     }
 
-    // ToolboxManager class
-    class ToolboxManager {
+    // FloatingToolbarManager class
+    class FloatingToolbarManager {
         constructor(noteManager, highlightManager) {
             this.noteManager = noteManager;
             this.highlightManager = highlightManager;
             this.container = null;
             this.shadowRoot = null;
-            this.isExpanded = false;
-            this.currentCorner = 'bottom-right'; // 'bottom-right' or 'top-left'
-            this.noteText = '';
+            this.shell = null;
+            this.mainButton = null;
+            this.pinnedOpen = false;
+            this.hoverActive = false;
+            this.hoverRadius = 165;
+            this.isDragging = false;
+            this.dragMoved = false;
+            this.ignoreNextToggleClick = false;
+            this.dragStart = { x: 0, y: 0, left: 0, top: 0 };
+            this.onDragMoveBound = this.onDragMove.bind(this);
+            this.onDragEndBound = this.onDragEnd.bind(this);
+            this.onPointerTrackBound = this.onPointerTrack.bind(this);
+            this.defaultNoteStyle = {
+                type: 'paper',
+                bg: '#ffffff',
+                text: '#101010',
+                opacity: 0.97,
+                border: 'rgba(0,0,0,0.2)'
+            };
             this.init();
         }
 
         init() {
-            this.createToolbox();
+            this.createToolbar();
             this.setupEventListeners();
         }
 
-        createToolbox() {
-            // Create host container
+        createToolbar() {
             this.container = document.createElement('div');
-            this.container.id = 'annotation-toolbox';
-            this.container.className = 'toolbox-container toolbox-collapsed';
+            this.container.id = 'annotation-fab';
+            this.container.className = 'annotation-fab-host';
 
-            // Shadow DOM
             this.shadowRoot = this.container.attachShadow({ mode: 'open' });
 
-            // Inject styles
             const link = document.createElement('link');
             link.rel = 'stylesheet';
             link.href = chrome.runtime.getURL('content.css');
             this.shadowRoot.appendChild(link);
 
-            // Create toolbox HTML
-            const toolbox = document.createElement('div');
-            toolbox.className = 'toolbox';
-            toolbox.innerHTML = `
-                <div class="toolbox-collapsed-view">
-                    <button class="toolbox-icon-btn" data-action="expand" title="Notes & Highlights">
-                        <span class="toolbox-icon">📝</span>
-                    </button>
-                </div>
-                <div class="toolbox-expanded-view" style="display: none;">
-                    <div class="toolbox-header">
-                        <span class="toolbox-title">Notes & Highlights</span>
-                        <button class="toolbox-close-btn" data-action="collapse">×</button>
-                    </div>
-                    <div class="toolbox-content">
-                        <div class="toolbox-section">
-                            <div class="toolbox-section-title">📝 Notes</div>
-                            <textarea class="toolbox-note-input" placeholder="Type your note here..." rows="3"></textarea>
-                            <div class="toolbox-buttons">
-                                <button class="toolbox-btn toolbox-btn-primary" data-action="add-note">Add Note</button>
-                                <button class="toolbox-btn" data-action="clear-note">Clear</button>
-                            </div>
-                        </div>
-                        <div class="toolbox-section">
-                            <div class="toolbox-section-title">🖍️ Highlight Text</div>
-                            <button class="toolbox-btn" data-action="highlight-text">Highlight Selected Text</button>
-                        </div>
-                        <div class="toolbox-section">
-                            <div class="toolbox-section-title">⬜ Highlight Area</div>
-                            <button class="toolbox-btn" data-action="highlight-area">Draw Highlight</button>
-                        </div>
-                        <div class="toolbox-section">
-                            <div class="toolbox-color-picker">
-                                <label>Color:</label>
-                                <input type="color" class="toolbox-color-input" value="#fff740" data-action="set-color">
-                                <div class="toolbox-color-presets">
-                                    <button class="toolbox-color-preset" data-color="#fff740" style="background: #fff740;"></button>
-                                    <button class="toolbox-color-preset" data-color="#89b4fa" style="background: #89b4fa;"></button>
-                                    <button class="toolbox-color-preset" data-color="#a6e3a1" style="background: #a6e3a1;"></button>
-                                    <button class="toolbox-color-preset" data-color="#f38ba8" style="background: #f38ba8;"></button>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="toolbox-section">
-                            <button class="toolbox-btn toolbox-btn-danger" data-action="clear-all-highlights">Clear All Highlights</button>
-                        </div>
-                    </div>
-                </div>
+            this.shell = document.createElement('div');
+            this.shell.className = 'annotation-fab-shell';
+            this.shell.innerHTML = `
+                <button class="annotation-fab-action annotation-fab-action-highlight" data-action="highlight" title="Highlight (coming soon)" aria-label="Highlight (coming soon)">
+                    <span class="annotation-fab-ring"></span>
+                    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                        <path d="M3 21l4.5-1 10-10-3.5-3.5-10 10L3 21z"></path>
+                        <path d="M13.5 6.5l3.5 3.5"></path>
+                    </svg>
+                </button>
+                <button class="annotation-fab-action annotation-fab-action-note" data-action="note" title="Add note" aria-label="Add note">
+                    <span class="annotation-fab-ring"></span>
+                    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                        <path d="M5 3h14v18H5z"></path>
+                        <path d="M9 8h6"></path>
+                        <path d="M9 12h6"></path>
+                    </svg>
+                </button>
+                <button class="annotation-fab-main" data-action="toggle" title="Annotation tools" aria-label="Annotation tools">
+                    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                        <circle cx="12" cy="12" r="3.2"></circle>
+                        <path d="M12 4v3"></path>
+                        <path d="M12 17v3"></path>
+                        <path d="M4 12h3"></path>
+                        <path d="M17 12h3"></path>
+                    </svg>
+                </button>
             `;
 
-            this.shadowRoot.appendChild(toolbox);
+            this.shadowRoot.appendChild(this.shell);
             document.body.appendChild(this.container);
-            this.updatePosition();
+            this.mainButton = this.shell.querySelector('.annotation-fab-main');
         }
 
         setupEventListeners() {
-            const toolbox = this.shadowRoot.querySelector('.toolbox');
+            this.shell.addEventListener('click', (e) => {
+                const button = e.target.closest('button[data-action]');
+                if (!button) return;
 
-            // Expand/collapse
-            toolbox.addEventListener('click', (e) => {
-                const action = e.target.closest('[data-action]')?.dataset.action;
-                if (action === 'expand') {
-                    this.expand();
-                } else if (action === 'collapse') {
-                    this.collapse();
-                } else if (action === 'add-note') {
-                    this.addNote();
-                } else if (action === 'clear-note') {
-                    this.clearNote();
-                } else if (action === 'highlight-text') {
-                    this.highlightText();
-                } else if (action === 'highlight-area') {
-                    this.highlightArea();
-                } else if (action === 'clear-all-highlights') {
-                    this.clearAllHighlights();
-                } else if (action === 'set-color') {
-                    const color = e.target.value;
-                    this.highlightManager.setColor(color);
+                const action = button.dataset.action;
+                e.preventDefault();
+                e.stopPropagation();
+
+                if (action === 'toggle') {
+                    if (this.ignoreNextToggleClick) {
+                        this.ignoreNextToggleClick = false;
+                        return;
+                    }
+                    if (this.pinnedOpen) {
+                        this.pinnedOpen = false;
+                        this.hoverActive = false;
+                    } else {
+                        this.pinnedOpen = true;
+                    }
+                    this.updateOpenState();
+                    return;
+                }
+
+                if (action === 'note') {
+                    this.startNotePlacement();
+                    return;
+                }
+
+                if (action === 'highlight') {
+                    // Placeholder: icon is visible but action wiring is deferred.
+                    this.pinnedOpen = false;
+                    this.hoverActive = false;
+                    this.updateOpenState();
                 }
             });
 
-            // Color presets
-            const colorPresets = this.shadowRoot.querySelectorAll('.toolbox-color-preset');
-            colorPresets.forEach(btn => {
-                btn.addEventListener('click', () => {
-                    const color = btn.dataset.color;
-                    this.highlightManager.setColor(color);
-                    const colorInput = this.shadowRoot.querySelector('.toolbox-color-input');
-                    if (colorInput) colorInput.value = color;
-                });
+            this.shell.addEventListener('mouseenter', () => {
+                if (this.isDragging) return;
+                this.hoverActive = true;
+                this.updateOpenState();
             });
 
-            // Note input
-            const noteInput = this.shadowRoot.querySelector('.toolbox-note-input');
-            if (noteInput) {
-                noteInput.addEventListener('input', (e) => {
-                    this.noteText = e.target.value;
+            document.addEventListener('mousemove', this.onPointerTrackBound, true);
+
+            document.addEventListener('click', (e) => {
+                if (!this.pinnedOpen) return;
+                const path = e.composedPath ? e.composedPath() : [];
+                if (path.includes(this.container)) return;
+                this.pinnedOpen = false;
+                this.updateOpenState();
+            }, true);
+
+            if (this.mainButton) {
+                this.mainButton.addEventListener('mousedown', (e) => {
+                    if (e.button !== 0) return;
+                    this.startDrag(e);
                 });
             }
-
-            // Hover to expand (optional)
-            this.container.addEventListener('mouseenter', () => {
-                if (!this.isExpanded) {
-                    // Auto-expand on hover after delay
-                    this.expandTimeout = setTimeout(() => {
-                        if (!this.isExpanded) {
-                            this.expand();
-                        }
-                    }, 300);
-                }
-            });
-
-            this.container.addEventListener('mouseleave', () => {
-                if (this.expandTimeout) {
-                    clearTimeout(this.expandTimeout);
-                }
-            });
         }
 
-        expand() {
-            this.isExpanded = true;
-            this.container.classList.remove('toolbox-collapsed');
-            this.container.classList.add('toolbox-expanded');
-            const collapsedView = this.shadowRoot.querySelector('.toolbox-collapsed-view');
-            const expandedView = this.shadowRoot.querySelector('.toolbox-expanded-view');
-            if (collapsedView) collapsedView.style.display = 'none';
-            if (expandedView) expandedView.style.display = 'block';
+        startNotePlacement() {
+            this.noteManager.pendingNoteStyle = this.defaultNoteStyle;
+            this.noteManager.startPlacementMode();
+            this.pinnedOpen = false;
+            this.hoverActive = false;
+            this.updateOpenState();
         }
 
-        collapse() {
-            this.isExpanded = false;
-            this.container.classList.remove('toolbox-expanded');
-            this.container.classList.add('toolbox-collapsed');
-            const collapsedView = this.shadowRoot.querySelector('.toolbox-collapsed-view');
-            const expandedView = this.shadowRoot.querySelector('.toolbox-expanded-view');
-            if (collapsedView) collapsedView.style.display = 'block';
-            if (expandedView) expandedView.style.display = 'none';
+        startDrag(e) {
+            this.isDragging = true;
+            this.dragMoved = false;
+            this.ignoreNextToggleClick = false;
+            this.pinnedOpen = false;
+            this.hoverActive = false;
+            this.updateOpenState();
+
+            const rect = this.shell.getBoundingClientRect();
+            this.dragStart = {
+                x: e.clientX,
+                y: e.clientY,
+                left: rect.left,
+                top: rect.top
+            };
+
+            this.shell.style.left = rect.left + 'px';
+            this.shell.style.top = rect.top + 'px';
+            this.shell.style.right = 'auto';
+            this.shell.style.bottom = 'auto';
+            this.shell.classList.add('dragging');
+
+            document.addEventListener('mousemove', this.onDragMoveBound, true);
+            document.addEventListener('mouseup', this.onDragEndBound, true);
+            e.preventDefault();
         }
 
-        addNote() {
-            if (!this.noteText.trim()) {
+        onDragMove(e) {
+            if (!this.isDragging) return;
+            const dx = e.clientX - this.dragStart.x;
+            const dy = e.clientY - this.dragStart.y;
+            if (Math.abs(dx) > 2 || Math.abs(dy) > 2) {
+                this.dragMoved = true;
+            }
+
+            const rect = this.shell.getBoundingClientRect();
+            const maxLeft = Math.max(8, window.innerWidth - rect.width - 8);
+            const maxTop = Math.max(8, window.innerHeight - rect.height - 8);
+            const nextLeft = Math.min(maxLeft, Math.max(8, this.dragStart.left + dx));
+            const nextTop = Math.min(maxTop, Math.max(8, this.dragStart.top + dy));
+            this.shell.style.left = nextLeft + 'px';
+            this.shell.style.top = nextTop + 'px';
+            e.preventDefault();
+        }
+
+        onDragEnd() {
+            if (!this.isDragging) return;
+            this.isDragging = false;
+            this.shell.classList.remove('dragging');
+            document.removeEventListener('mousemove', this.onDragMoveBound, true);
+            document.removeEventListener('mouseup', this.onDragEndBound, true);
+            if (this.dragMoved) {
+                this.ignoreNextToggleClick = true;
+            }
+            this.dragMoved = false;
+        }
+
+        onPointerTrack(e) {
+            if (this.pinnedOpen || !this.hoverActive || this.isDragging || !this.mainButton) {
                 return;
             }
-
-            // Use last mouse position
-            const x = lastMousePosition.x;
-            const y = lastMousePosition.y;
-
-            // Get default style (post-it style)
-            const style = {
-                type: 'postit',
-                bg: '#fff740',
-                text: '#202124',
-                opacity: 0.95,
-                border: 'rgba(0,0,0,0.1)'
-            };
-
-            // Generate note ID (using same pattern as NoteManager)
-            const noteId = 'note-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9);
-            const noteData = {
-                id: noteId,
-                text: this.noteText.trim(),
-                anchor: {
-                    selector: 'body',
-                    offset: { x: 0, y: 0 }
-                },
-                style: style,
-                visible: true,
-                minimized: false,
-                size: { width: '300px', height: 'auto' }
-            };
-
-            this.noteManager.createNoteAtPosition(x, y, noteData);
-            // Note is saved in createNoteAtPosition via saveNote
-
-            // Clear note text
-            this.clearNote();
-
-            // Move to opposite corner
-            this.moveToOppositeCorner();
-        }
-
-        clearNote() {
-            this.noteText = '';
-            const noteInput = this.shadowRoot.querySelector('.toolbox-note-input');
-            if (noteInput) {
-                noteInput.value = '';
+            const rect = this.mainButton.getBoundingClientRect();
+            const centerX = rect.left + rect.width / 2;
+            const centerY = rect.top + rect.height / 2;
+            const dx = e.clientX - centerX;
+            const dy = e.clientY - centerY;
+            const distance = Math.sqrt(dx * dx + dy * dy);
+            if (distance > this.hoverRadius) {
+                this.hoverActive = false;
+                this.updateOpenState();
             }
         }
 
-        highlightText() {
-            const success = this.highlightManager.highlightText();
-            if (!success) {
-                alert('Please select some text first');
-            }
-        }
-
-        highlightArea() {
-            this.highlightManager.startAreaDrawing();
-        }
-
-        clearAllHighlights() {
-            if (confirm('Clear all highlights?')) {
-                this.highlightManager.clearAllHighlights();
-            }
-        }
-
-        moveToOppositeCorner() {
-            this.currentCorner = this.currentCorner === 'bottom-right' ? 'top-left' : 'bottom-right';
-            this.updatePosition();
-        }
-
-        updatePosition() {
-            // Remove all position styles first
-            this.container.style.top = '';
-            this.container.style.left = '';
-            this.container.style.bottom = '';
-            this.container.style.right = '';
-            
-            // Apply transition
-            this.container.style.transition = 'all 0.4s ease';
-            
-            // Set new position
-            if (this.currentCorner === 'bottom-right') {
-                this.container.style.bottom = '20px';
-                this.container.style.right = '20px';
-            } else {
-                this.container.style.top = '20px';
-                this.container.style.left = '20px';
-            }
+        updateOpenState() {
+            const isOpen = this.pinnedOpen || this.hoverActive;
+            this.shell.classList.toggle('open', isOpen);
         }
     }
 
@@ -1426,7 +1387,7 @@
     // Initialize HighlightManager
     const highlightManager = new HighlightManager();
 
-    // Initialize ToolboxManager
-    const toolboxManager = new ToolboxManager(noteManager, highlightManager);
+    // Initialize FloatingToolbarManager
+    const floatingToolbarManager = new FloatingToolbarManager(noteManager, highlightManager);
 
 })();
