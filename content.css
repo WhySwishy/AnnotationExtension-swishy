@@ -104,6 +104,11 @@
     background: rgba(255, 255, 255, 0.1);
 }
 
+.control-btn.delete-btn:hover {
+    color: #f38ba8;
+    background: rgba(243, 139, 168, 0.2);
+}
+
 /* Content Wrapper */
 .note-content-wrapper {
     flex: 1;
@@ -169,4 +174,278 @@
 .note-content-wrapper::-webkit-scrollbar-thumb {
     background-color: rgba(255, 255, 255, 0.2);
     border-radius: 3px;
+}
+
+/* Toolbox Styles */
+.toolbox-container {
+    position: fixed;
+    z-index: 2147483646;
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    transition: all 0.3s ease;
+}
+
+.toolbox-collapsed {
+    bottom: 20px;
+    right: 20px;
+}
+
+.toolbox-expanded {
+    bottom: 20px;
+    right: 20px;
+}
+
+.toolbox {
+    background: rgba(30, 30, 46, 0.95);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border-radius: 12px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    overflow: hidden;
+    transition: all 0.3s ease;
+}
+
+.toolbox-collapsed-view {
+    padding: 12px;
+}
+
+.toolbox-icon-btn {
+    background: rgba(137, 180, 250, 0.2);
+    border: 1px solid rgba(137, 180, 250, 0.3);
+    border-radius: 8px;
+    padding: 10px;
+    cursor: pointer;
+    transition: all 0.2s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 44px;
+    height: 44px;
+}
+
+.toolbox-icon-btn:hover {
+    background: rgba(137, 180, 250, 0.3);
+    transform: scale(1.05);
+}
+
+.toolbox-icon {
+    font-size: 20px;
+    line-height: 1;
+}
+
+.toolbox-expanded-view {
+    width: 320px;
+    max-height: 600px;
+    display: flex;
+    flex-direction: column;
+}
+
+.toolbox-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 16px;
+    background: rgba(255, 255, 255, 0.05);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.toolbox-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: #cdd6f4;
+}
+
+.toolbox-close-btn {
+    background: none;
+    border: none;
+    color: #a6adc8;
+    cursor: pointer;
+    font-size: 20px;
+    line-height: 1;
+    padding: 0;
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 4px;
+    transition: all 0.2s;
+}
+
+.toolbox-close-btn:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: #fff;
+}
+
+.toolbox-content {
+    padding: 16px;
+    overflow-y: auto;
+    max-height: 550px;
+}
+
+.toolbox-section {
+    margin-bottom: 20px;
+}
+
+.toolbox-section:last-child {
+    margin-bottom: 0;
+}
+
+.toolbox-section-title {
+    font-size: 12px;
+    font-weight: 600;
+    color: #a6adc8;
+    margin-bottom: 8px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.toolbox-note-input {
+    width: 100%;
+    min-height: 80px;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+    padding: 10px;
+    color: #cdd6f4;
+    font-family: inherit;
+    font-size: 13px;
+    resize: vertical;
+    outline: none;
+    transition: border-color 0.2s;
+    box-sizing: border-box;
+}
+
+.toolbox-note-input:focus {
+    border-color: #89b4fa;
+    background: rgba(255, 255, 255, 0.08);
+}
+
+.toolbox-note-input::placeholder {
+    color: #6c7086;
+}
+
+.toolbox-buttons {
+    display: flex;
+    gap: 8px;
+    margin-top: 8px;
+}
+
+.toolbox-btn {
+    flex: 1;
+    padding: 8px 16px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.05);
+    color: #cdd6f4;
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s;
+    font-family: inherit;
+}
+
+.toolbox-btn:hover {
+    background: rgba(255, 255, 255, 0.1);
+    border-color: rgba(255, 255, 255, 0.2);
+}
+
+.toolbox-btn-primary {
+    background: rgba(137, 180, 250, 0.2);
+    border-color: rgba(137, 180, 250, 0.3);
+    color: #89b4fa;
+}
+
+.toolbox-btn-primary:hover {
+    background: rgba(137, 180, 250, 0.3);
+    border-color: rgba(137, 180, 250, 0.5);
+}
+
+.toolbox-btn-danger {
+    background: rgba(243, 139, 168, 0.2);
+    border-color: rgba(243, 139, 168, 0.3);
+    color: #f38ba8;
+}
+
+.toolbox-btn-danger:hover {
+    background: rgba(243, 139, 168, 0.3);
+    border-color: rgba(243, 139, 168, 0.5);
+}
+
+.toolbox-color-picker {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.toolbox-color-picker label {
+    font-size: 11px;
+    color: #a6adc8;
+}
+
+.toolbox-color-input {
+    width: 100%;
+    height: 32px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 6px;
+    cursor: pointer;
+    background: rgba(255, 255, 255, 0.05);
+}
+
+.toolbox-color-presets {
+    display: flex;
+    gap: 8px;
+}
+
+.toolbox-color-preset {
+    width: 32px;
+    height: 32px;
+    border: 2px solid rgba(255, 255, 255, 0.2);
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.2s;
+    padding: 0;
+}
+
+.toolbox-color-preset:hover {
+    transform: scale(1.1);
+    border-color: rgba(255, 255, 255, 0.4);
+}
+
+.toolbox-content::-webkit-scrollbar {
+    width: 6px;
+}
+
+.toolbox-content::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.toolbox-content::-webkit-scrollbar-thumb {
+    background-color: rgba(255, 255, 255, 0.2);
+    border-radius: 3px;
+}
+
+/* Highlight Styles */
+.text-highlight {
+    background-color: #fff740;
+    color: inherit;
+    padding: 2px 0;
+    border-radius: 2px;
+    display: inline;
+}
+
+.area-highlight {
+    position: fixed;
+    pointer-events: none;
+    z-index: 2147483645;
+    border: 2px dashed;
+    border-radius: 4px;
+}
+
+.area-highlight-preview {
+    position: fixed;
+    pointer-events: none;
+    z-index: 2147483645;
+    border: 2px dashed;
+    border-radius: 4px;
 }

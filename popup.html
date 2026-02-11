@@ -12,18 +12,29 @@
   <div class="container">
     <header>
       <h1>Website Notes</h1>
-      <label class="toggle-switch">
-        <input type="checkbox" id="toggle-overlay" checked>
-        <span class="slider"></span>
-      </label>
     </header>
 
     <div class="domain-info">
       <span id="current-domain">Loading...</span>
     </div>
 
-    <!-- Design Section -->
-    <details class="design-panel">
+    <div class="notes-actions">
+      <button id="create-note-btn" class="primary-btn">
+        <span>+</span> Create New Note
+      </button>
+      <div class="shortcut-hint">Press <kbd>N</kbd> to create</div>
+    </div>
+
+    <div id="notes-list" class="notes-list">
+      <!-- Notes will be dynamically inserted here -->
+    </div>
+
+    <div id="empty-state" class="empty-state" style="display: none;">
+      <p>No notes yet. Click "Create New Note" to add one!</p>
+    </div>
+
+    <!-- Design Section (for new notes) -->
+    <details class="design-panel" id="design-panel" style="display: none;">
       <summary>Design & Theme</summary>
       <div class="design-controls">
         <div class="control-row">
@@ -49,16 +60,9 @@
       </div>
     </details>
 
-    <textarea id="note-input" placeholder="Type your notes here..."></textarea>
-
     <div class="status-bar">
-      <span id="char-count">0 chars</span>
-      <span id="save-status">Saved</span>
+      <span id="save-status">Ready</span>
     </div>
-
-    <footer>
-      <button id="delete-btn" class="danger-btn">Delete Note</button>
-    </footer>
   </div>
   <script src="popup.js"></script>
 </body>

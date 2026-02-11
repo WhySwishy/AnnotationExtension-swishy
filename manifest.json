@@ -1,8 +1,8 @@
 {
     "manifest_version": 3,
     "name": "Website Notes Overlay",
-    "version": "1.0",
-    "description": "Write and save persistent notes for specific websites with a floating overlay.",
+    "version": "2.0",
+    "description": "Create multiple post-it notes anchored to specific parts of websites. Notes stay in place and hide when scrolled away.",
     "permissions": [
         "storage",
         "activeTab"
