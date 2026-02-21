@@ -18,47 +18,15 @@
       <span id="current-domain">Loading...</span>
     </div>
 
-    <div class="notes-actions">
-      <button id="create-note-btn" class="primary-btn">
-        <span>+</span> Create New Note
-      </button>
-      <div class="shortcut-hint">Press <kbd>N</kbd> to create</div>
-    </div>
-
     <div id="notes-list" class="notes-list">
       <!-- Notes will be dynamically inserted here -->
     </div>
 
     <div id="empty-state" class="empty-state" style="display: none;">
-      <p>No notes yet. Click "Create New Note" to add one!</p>
+      <p>No notes yet. Click the annotation button at the bottom of the screen to add one!</p>
     </div>
 
-    <!-- Design Section (for new notes) -->
-    <details class="design-panel" id="design-panel" style="display: none;">
-      <summary>Design & Theme</summary>
-      <div class="design-controls">
-        <div class="control-row">
-          <label>Theme</label>
-          <select id="theme-select">
-            <option value="glass">Glass (Dark)</option>
-            <option value="paper">Paper (Light)</option>
-            <option value="postit">Post-it (Yellow)</option>
-            <option value="custom">Custom</option>
-          </select>
-        </div>
-        <div class="control-row">
-          <label>Background</label>
-          <div class="color-inputs">
-            <input type="color" id="bg-color" value="#1e1e2e">
-            <input type="range" id="bg-opacity" min="0.1" max="1" step="0.05" value="0.4" title="Opacity">
-          </div>
-        </div>
-        <div class="control-row">
-          <label>Text Color</label>
-          <input type="color" id="text-color" value="#cdd6f4">
-        </div>
-      </div>
-    </details>
+
 
     <div class="status-bar">
       <span id="save-status">Ready</span>
