@@ -291,6 +291,13 @@
     transition: none;
 }
 
+.annotation-fab-action.active {
+    background: #111111;
+    color: #ffffff;
+    outline: 2px solid #fff;
+    outline-offset: 2px;
+}
+
 @media (max-width: 768px) {
     .annotation-fab-shell {
         right: 12px;

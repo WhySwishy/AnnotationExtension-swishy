@@ -1182,11 +1182,434 @@
         }
     }
 
+    // FreehandDrawingManager class
+    class FreehandDrawingManager {
+        constructor() {
+            this.isActive = false;
+            this.isDrawing = false;
+            this.isVisible = true;
+            this.currentColor = '#ff4444';
+            this.currentSize = 4;
+            this.strokes = []; // Array of {color, size, points[]}
+            this.currentStroke = null;
+            this.canvas = null;
+            this.ctx = null;
+            this.paletteEl = null;
+            this.undoStack = []; // For undo support
+
+            this.colors = ['#ff4444', '#ff9900', '#ffdd00', '#44cc44', '#4488ff', '#cc44ff', '#ff44aa', '#ffffff', '#000000'];
+            this.sizes = [2, 4, 8, 14];
+
+            this.onMouseDown = this.onMouseDown.bind(this);
+            this.onMouseMove = this.onMouseMove.bind(this);
+            this.onMouseUp = this.onMouseUp.bind(this);
+            this.onTouchStart = this.onTouchStart.bind(this);
+            this.onTouchMove = this.onTouchMove.bind(this);
+            this.onTouchEnd = this.onTouchEnd.bind(this);
+
+            this.init();
+        }
+
+        init() {
+            // Load saved strokes
+            chrome.storage.local.get([HOSTNAME], (result) => {
+                const data = result[HOSTNAME];
+                if (data && data.drawings && Array.isArray(data.drawings)) {
+                    this.strokes = data.drawings;
+                    // If canvas exists, render them
+                    if (this.canvas) this.redrawAll();
+                }
+            });
+
+            // Listen for storage changes (e.g. popup toggling visibility)
+            chrome.storage.onChanged.addListener((changes, area) => {
+                if (area === 'local' && changes[HOSTNAME]) {
+                    const newData = changes[HOSTNAME].newValue;
+                    if (newData && newData.drawingsVisible !== undefined) {
+                        this.isVisible = newData.drawingsVisible;
+                        if (this.canvas) {
+                            this.canvas.style.display = this.isVisible ? 'block' : 'none';
+                        }
+                    }
+                }
+            });
+
+            // Listen for messages from popup
+            chrome.runtime.onMessage.addListener((message) => {
+                if (message.action === 'setDrawingsVisible') {
+                    this.setVisible(message.visible);
+                } else if (message.action === 'clearDrawings') {
+                    this.clearAll();
+                }
+            });
+        }
+
+        createCanvas() {
+            if (this.canvas) return;
+
+            this.canvas = document.createElement('canvas');
+            this.canvas.id = '__freehand_canvas__';
+            this.canvas.style.cssText = `
+                position: fixed;
+                top: 0;
+                left: 0;
+                width: 100vw;
+                height: 100vh;
+                z-index: 2147483644;
+                pointer-events: none;
+                display: ${this.isVisible ? 'block' : 'none'};
+            `;
+            this.canvas.width = window.innerWidth;
+            this.canvas.height = window.innerHeight;
+            this.ctx = this.canvas.getContext('2d');
+            document.body.appendChild(this.canvas);
+
+            // Handle resize
+            window.addEventListener('resize', () => {
+                const imageData = this.ctx.getImageData(0, 0, this.canvas.width, this.canvas.height);
+                this.canvas.width = window.innerWidth;
+                this.canvas.height = window.innerHeight;
+                this.ctx.putImageData(imageData, 0, 0);
+                this.redrawAll();
+            });
+
+            this.redrawAll();
+        }
+
+        createPalette() {
+            if (this.paletteEl) {
+                this.paletteEl.style.display = 'flex';
+                return;
+            }
+
+            const palette = document.createElement('div');
+            palette.id = '__freehand_palette__';
+            palette.style.cssText = `
+                position: fixed;
+                bottom: 90px;
+                right: 18px;
+                background: rgba(15,15,16,0.95);
+                border: 1px solid rgba(255,255,255,0.15);
+                border-radius: 16px;
+                padding: 12px;
+                display: flex;
+                flex-direction: column;
+                gap: 10px;
+                z-index: 2147483647;
+                box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+                backdrop-filter: blur(8px);
+                font-family: 'Segoe UI', system-ui, sans-serif;
+                min-width: 180px;
+                cursor: default;
+                user-select: none;
+            `;
+
+            // Header
+            const header = document.createElement('div');
+            header.style.cssText = `
+                display: flex; align-items: center; justify-content: space-between;
+                margin-bottom: 2px;
+            `;
+            const title = document.createElement('span');
+            title.textContent = 'Draw';
+            title.style.cssText = `color: #a6adc8; font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase;`;
+            
+            const doneBtn = document.createElement('button');
+            doneBtn.textContent = '✕ Done';
+            doneBtn.style.cssText = `
+                background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.1);
+                color: #cdd6f4; border-radius: 8px; padding: 3px 8px; font-size: 11px;
+                cursor: pointer; font-family: inherit;
+            `;
+            doneBtn.addEventListener('click', () => this.deactivate());
+            doneBtn.addEventListener('mouseenter', () => doneBtn.style.background = 'rgba(255,255,255,0.15)');
+            doneBtn.addEventListener('mouseleave', () => doneBtn.style.background = 'rgba(255,255,255,0.08)');
+            header.appendChild(title);
+            header.appendChild(doneBtn);
+
+            // Color swatches
+            const colorsLabel = document.createElement('div');
+            colorsLabel.textContent = 'Color';
+            colorsLabel.style.cssText = `color: #585b70; font-size: 10px; font-weight: 500; letter-spacing: 0.05em; margin-top: 2px;`;
+            
+            const colorsRow = document.createElement('div');
+            colorsRow.style.cssText = `display: flex; flex-wrap: wrap; gap: 5px;`;
+            this.colorSwatches = {};
+            this.colors.forEach(color => {
+                const swatch = document.createElement('button');
+                swatch.style.cssText = `
+                    width: 22px; height: 22px; border-radius: 50%; background: ${color};
+                    border: 2px solid transparent; cursor: pointer; flex-shrink: 0;
+                    transition: transform 0.15s, border-color 0.15s;
+                `;
+                if (color === this.currentColor) {
+                    swatch.style.borderColor = '#fff';
+                    swatch.style.transform = 'scale(1.2)';
+                }
+                swatch.addEventListener('click', () => {
+                    this.currentColor = color;
+                    Object.values(this.colorSwatches).forEach(s => {
+                        s.style.borderColor = 'transparent';
+                        s.style.transform = 'scale(1)';
+                    });
+                    swatch.style.borderColor = '#fff';
+                    swatch.style.transform = 'scale(1.2)';
+                });
+                colorsRow.appendChild(swatch);
+                this.colorSwatches[color] = swatch;
+            });
+
+            // Size picker
+            const sizeLabel = document.createElement('div');
+            sizeLabel.textContent = 'Size';
+            sizeLabel.style.cssText = `color: #585b70; font-size: 10px; font-weight: 500; letter-spacing: 0.05em;`;
+
+            const sizesRow = document.createElement('div');
+            sizesRow.style.cssText = `display: flex; gap: 6px; align-items: center;`;
+            this.sizeBtns = {};
+            this.sizes.forEach(size => {
+                const btn = document.createElement('button');
+                btn.style.cssText = `
+                    width: ${10 + size * 2}px; height: ${10 + size * 2}px; border-radius: 50%;
+                    background: ${size === this.currentSize ? '#fff' : 'rgba(255,255,255,0.3)'};
+                    border: 2px solid ${size === this.currentSize ? '#fff' : 'rgba(255,255,255,0.2)'};
+                    cursor: pointer; flex-shrink: 0; transition: background 0.15s, border-color 0.15s;
+                `;
+                btn.addEventListener('click', () => {
+                    this.currentSize = size;
+                    Object.values(this.sizeBtns).forEach(b => {
+                        b.style.background = 'rgba(255,255,255,0.3)';
+                        b.style.borderColor = 'rgba(255,255,255,0.2)';
+                    });
+                    btn.style.background = '#fff';
+                    btn.style.borderColor = '#fff';
+                });
+                sizesRow.appendChild(btn);
+                this.sizeBtns[size] = btn;
+            });
+
+            // Undo + Clear buttons
+            const actionsRow = document.createElement('div');
+            actionsRow.style.cssText = `display: flex; gap: 6px; margin-top: 2px;`;
+            
+            const undoBtn = this._makeActionBtn('↩ Undo', () => this.undo());
+            const clearBtn = this._makeActionBtn('✕ Clear', () => this.clearAll(), '#f38ba8');
+            actionsRow.appendChild(undoBtn);
+            actionsRow.appendChild(clearBtn);
+
+            palette.appendChild(header);
+            palette.appendChild(colorsLabel);
+            palette.appendChild(colorsRow);
+            palette.appendChild(sizeLabel);
+            palette.appendChild(sizesRow);
+            palette.appendChild(actionsRow);
+
+            document.body.appendChild(palette);
+            this.paletteEl = palette;
+
+            // Prevent palette clicks from propagating to canvas
+            palette.addEventListener('mousedown', e => e.stopPropagation());
+        }
+
+        _makeActionBtn(text, onClick, hoverColor = '#89b4fa') {
+            const btn = document.createElement('button');
+            btn.textContent = text;
+            btn.style.cssText = `
+                flex: 1; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.1);
+                color: #cdd6f4; border-radius: 8px; padding: 5px 0; font-size: 11px;
+                cursor: pointer; font-family: inherit; transition: background 0.15s, color 0.15s;
+            `;
+            btn.addEventListener('click', onClick);
+            btn.addEventListener('mouseenter', () => { btn.style.color = hoverColor; btn.style.background = 'rgba(255,255,255,0.12)'; });
+            btn.addEventListener('mouseleave', () => { btn.style.color = '#cdd6f4'; btn.style.background = 'rgba(255,255,255,0.06)'; });
+            return btn;
+        }
+
+        activate() {
+            this.isActive = true;
+            this.createCanvas();
+            this.createPalette();
+
+            // Enable pointer events on canvas
+            this.canvas.style.pointerEvents = 'all';
+            document.body.style.cursor = 'none'; // We'll use a custom cursor
+
+            this.canvas.addEventListener('mousedown', this.onMouseDown);
+            this.canvas.addEventListener('mousemove', this.onMouseMove);
+            this.canvas.addEventListener('mouseup', this.onMouseUp);
+            this.canvas.addEventListener('mouseleave', this.onMouseUp);
+            this.canvas.addEventListener('touchstart', this.onTouchStart, { passive: false });
+            this.canvas.addEventListener('touchmove', this.onTouchMove, { passive: false });
+            this.canvas.addEventListener('touchend', this.onTouchEnd);
+        }
+
+        deactivate() {
+            this.isActive = false;
+            if (this.canvas) {
+                this.canvas.style.pointerEvents = 'none';
+                this.canvas.removeEventListener('mousedown', this.onMouseDown);
+                this.canvas.removeEventListener('mousemove', this.onMouseMove);
+                this.canvas.removeEventListener('mouseup', this.onMouseUp);
+                this.canvas.removeEventListener('mouseleave', this.onMouseUp);
+                this.canvas.removeEventListener('touchstart', this.onTouchStart);
+                this.canvas.removeEventListener('touchmove', this.onTouchMove);
+                this.canvas.removeEventListener('touchend', this.onTouchEnd);
+                // Redraw without cursor
+                this.redrawAll();
+            }
+            if (this.paletteEl) {
+                this.paletteEl.style.display = 'none';
+            }
+            document.body.style.cursor = '';
+
+            // Notify FloatingToolbarManager to update button state
+            window.dispatchEvent(new CustomEvent('freehand-deactivated'));
+        }
+
+        setVisible(visible) {
+            this.isVisible = visible;
+            if (this.canvas) {
+                this.canvas.style.display = visible ? 'block' : 'none';
+            }
+            // Persist
+            chrome.storage.local.get([HOSTNAME], (result) => {
+                const data = result[HOSTNAME] || {};
+                data.drawingsVisible = visible;
+                chrome.storage.local.set({ [HOSTNAME]: data });
+            });
+        }
+
+        onMouseDown(e) {
+            if (e.button !== 0) return;
+            this.isDrawing = true;
+            this.currentStroke = {
+                color: this.currentColor,
+                size: this.currentSize,
+                points: [{ x: e.clientX, y: e.clientY }]
+            };
+            this.drawCursor(e.clientX, e.clientY);
+        }
+
+        onMouseMove(e) {
+            // Redraw to show cursor dot
+            if (this.isDrawing && this.currentStroke) {
+                this.currentStroke.points.push({ x: e.clientX, y: e.clientY });
+                this.redrawAll();
+                this.drawStroke(this.currentStroke);
+            } else {
+                this.redrawAll();
+            }
+            this.drawCursor(e.clientX, e.clientY);
+        }
+
+        onMouseUp(e) {
+            if (!this.isDrawing || !this.currentStroke) return;
+            this.isDrawing = false;
+            if (this.currentStroke.points.length > 1) {
+                this.strokes.push(this.currentStroke);
+                this.undoStack.push(this.strokes.length - 1);
+                this.saveDrawings();
+            }
+            this.currentStroke = null;
+            this.redrawAll();
+        }
+
+        onTouchStart(e) {
+            e.preventDefault();
+            const touch = e.touches[0];
+            this.isDrawing = true;
+            this.currentStroke = {
+                color: this.currentColor,
+                size: this.currentSize,
+                points: [{ x: touch.clientX, y: touch.clientY }]
+            };
+        }
+
+        onTouchMove(e) {
+            e.preventDefault();
+            if (!this.isDrawing || !this.currentStroke) return;
+            const touch = e.touches[0];
+            this.currentStroke.points.push({ x: touch.clientX, y: touch.clientY });
+            this.redrawAll();
+            this.drawStroke(this.currentStroke);
+        }
+
+        onTouchEnd(e) {
+            this.onMouseUp(e);
+        }
+
+        drawCursor(x, y) {
+            const ctx = this.ctx;
+            const r = this.currentSize / 2 + 1;
+            ctx.save();
+            ctx.beginPath();
+            ctx.arc(x, y, r, 0, Math.PI * 2);
+            ctx.fillStyle = this.currentColor;
+            ctx.fill();
+            ctx.strokeStyle = 'rgba(255,255,255,0.8)';
+            ctx.lineWidth = 1.5;
+            ctx.stroke();
+            ctx.restore();
+        }
+
+        drawStroke(stroke) {
+            if (!stroke || stroke.points.length < 2) return;
+            const ctx = this.ctx;
+            ctx.save();
+            ctx.globalCompositeOperation = 'source-over';
+            ctx.strokeStyle = stroke.color;
+            ctx.lineWidth = stroke.size;
+            ctx.lineCap = 'round';
+            ctx.lineJoin = 'round';
+            ctx.globalAlpha = 0.85;
+            ctx.beginPath();
+            ctx.moveTo(stroke.points[0].x, stroke.points[0].y);
+            for (let i = 1; i < stroke.points.length - 1; i++) {
+                const midX = (stroke.points[i].x + stroke.points[i + 1].x) / 2;
+                const midY = (stroke.points[i].y + stroke.points[i + 1].y) / 2;
+                ctx.quadraticCurveTo(stroke.points[i].x, stroke.points[i].y, midX, midY);
+            }
+            const last = stroke.points[stroke.points.length - 1];
+            ctx.lineTo(last.x, last.y);
+            ctx.stroke();
+            ctx.restore();
+        }
+
+        redrawAll() {
+            if (!this.ctx || !this.canvas) return;
+            this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+            this.strokes.forEach(stroke => this.drawStroke(stroke));
+        }
+
+        undo() {
+            if (this.strokes.length === 0) return;
+            this.strokes.pop();
+            this.redrawAll();
+            this.saveDrawings();
+        }
+
+        clearAll() {
+            this.strokes = [];
+            this.undoStack = [];
+            this.redrawAll();
+            this.saveDrawings();
+        }
+
+        saveDrawings() {
+            chrome.storage.local.get([HOSTNAME], (result) => {
+                const data = result[HOSTNAME] || {};
+                data.drawings = this.strokes;
+                chrome.storage.local.set({ [HOSTNAME]: data });
+            });
+        }
+    }
+
     // FloatingToolbarManager class
     class FloatingToolbarManager {
-        constructor(noteManager, highlightManager) {
+        constructor(noteManager, highlightManager, freehandDrawingManager) {
             this.noteManager = noteManager;
             this.highlightManager = highlightManager;
+            this.freehandDrawingManager = freehandDrawingManager;
             this.container = null;
             this.shadowRoot = null;
             this.shell = null;
@@ -1292,15 +1715,17 @@
                 }
 
                 if (action === 'highlight') {
-                    const isActive = this.highlightManager.toggleHighlightMode();
-                    if (isActive) {
-                        button.classList.add('active');
+                    const highlightBtn = button;
+                    if (this.freehandDrawingManager.isActive) {
+                        this.freehandDrawingManager.deactivate();
+                        highlightBtn.classList.remove('active');
                     } else {
-                        button.classList.remove('active');
+                        this.freehandDrawingManager.activate();
+                        highlightBtn.classList.add('active');
+                        this.pinnedOpen = false;
+                        this.hoverActive = false;
+                        this.updateOpenState();
                     }
-                    this.pinnedOpen = false;
-                    this.hoverActive = false;
-                    this.updateOpenState();
                     return;
                 }
             });
@@ -1327,6 +1752,12 @@
                     this.startDrag(e);
                 });
             }
+
+            // Listen for freehand deactivation (e.g. from Done button in palette)
+            window.addEventListener('freehand-deactivated', () => {
+                const highlightBtn = this.shell.querySelector('.annotation-fab-action-highlight');
+                if (highlightBtn) highlightBtn.classList.remove('active');
+            });
         }
 
         startNotePlacement() {
@@ -1422,7 +1853,10 @@
     // Initialize HighlightManager
     const highlightManager = new HighlightManager();
 
+    // Initialize FreehandDrawingManager
+    const freehandDrawingManager = new FreehandDrawingManager();
+
     // Initialize FloatingToolbarManager
-    const floatingToolbarManager = new FloatingToolbarManager(noteManager, highlightManager);
+    const floatingToolbarManager = new FloatingToolbarManager(noteManager, highlightManager, freehandDrawingManager);
 
 })();
