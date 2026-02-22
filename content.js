@@ -1250,30 +1250,53 @@
             this.canvas = document.createElement('canvas');
             this.canvas.id = '__freehand_canvas__';
             this.canvas.style.cssText = `
-                position: fixed;
+                position: absolute;
                 top: 0;
                 left: 0;
-                width: 100vw;
-                height: 100vh;
                 z-index: 2147483644;
                 pointer-events: none;
                 display: ${this.isVisible ? 'block' : 'none'};
             `;
-            this.canvas.width = window.innerWidth;
-            this.canvas.height = window.innerHeight;
-            this.ctx = this.canvas.getContext('2d');
-            document.body.appendChild(this.canvas);
+            this._resizeCanvas();
+            this.ctx = this.canvas.getContext('2d', { willReadFrequently: true });
+            document.documentElement.appendChild(this.canvas);
 
-            // Handle resize
+            // Handle resize — canvas must cover the full document
             window.addEventListener('resize', () => {
-                const imageData = this.ctx.getImageData(0, 0, this.canvas.width, this.canvas.height);
-                this.canvas.width = window.innerWidth;
-                this.canvas.height = window.innerHeight;
-                this.ctx.putImageData(imageData, 0, 0);
+                this._resizeCanvas();
                 this.redrawAll();
             });
 
+            // Re-check size on scroll in case page expanded (e.g. infinite scroll)
+            window.addEventListener('scroll', () => {
+                const needsResize = (
+                    document.documentElement.scrollHeight > this.canvas.height ||
+                    document.documentElement.scrollWidth > this.canvas.width
+                );
+                if (needsResize) {
+                    this._resizeCanvas();
+                    this.redrawAll();
+                }
+            }, { passive: true });
+
             this.redrawAll();
+        }
+
+        _resizeCanvas() {
+            const w = Math.max(
+                document.body.scrollWidth, document.documentElement.scrollWidth,
+                document.body.offsetWidth, document.documentElement.offsetWidth,
+                document.body.clientWidth, document.documentElement.clientWidth
+            );
+            const h = Math.max(
+                document.body.scrollHeight, document.documentElement.scrollHeight,
+                document.body.offsetHeight, document.documentElement.offsetHeight,
+                document.body.clientHeight, document.documentElement.clientHeight
+            );
+            this.canvas.width = w;
+            this.canvas.height = h;
+            this.canvas.style.width = w + 'px';
+            this.canvas.style.height = h + 'px';
         }
 
         createPalette() {
@@ -1485,21 +1508,21 @@
             this.currentStroke = {
                 color: this.currentColor,
                 size: this.currentSize,
-                points: [{ x: e.clientX, y: e.clientY }]
+                points: [{ x: e.pageX, y: e.pageY }]
             };
-            this.drawCursor(e.clientX, e.clientY);
+            this.drawCursor(e.pageX, e.pageY);
         }
 
         onMouseMove(e) {
             // Redraw to show cursor dot
             if (this.isDrawing && this.currentStroke) {
-                this.currentStroke.points.push({ x: e.clientX, y: e.clientY });
+                this.currentStroke.points.push({ x: e.pageX, y: e.pageY });
                 this.redrawAll();
                 this.drawStroke(this.currentStroke);
             } else {
                 this.redrawAll();
             }
-            this.drawCursor(e.clientX, e.clientY);
+            this.drawCursor(e.pageX, e.pageY);
         }
 
         onMouseUp(e) {
@@ -1521,7 +1544,7 @@
             this.currentStroke = {
                 color: this.currentColor,
                 size: this.currentSize,
-                points: [{ x: touch.clientX, y: touch.clientY }]
+                points: [{ x: touch.pageX, y: touch.pageY }]
             };
         }
 
@@ -1529,7 +1552,7 @@
             e.preventDefault();
             if (!this.isDrawing || !this.currentStroke) return;
             const touch = e.touches[0];
-            this.currentStroke.points.push({ x: touch.clientX, y: touch.clientY });
+            this.currentStroke.points.push({ x: touch.pageX, y: touch.pageY });
             this.redrawAll();
             this.drawStroke(this.currentStroke);
         }
