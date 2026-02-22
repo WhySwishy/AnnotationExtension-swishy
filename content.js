@@ -1188,13 +1188,16 @@
             this.isActive = false;
             this.isDrawing = false;
             this.isVisible = true;
+            this.currentTool = 'pen'; // 'pen' | 'eraser'
             this.currentColor = '#ff4444';
             this.currentSize = 4;
+            this.eraserSize = 20;
             this.strokes = []; // Array of {color, size, points[]}
             this.currentStroke = null;
             this.canvas = null;
             this.ctx = null;
             this.paletteEl = null;
+            this.toolBtns = {};
             this.undoStack = []; // For undo support
 
             this.colors = ['#ff4444', '#ff9900', '#ffdd00', '#44cc44', '#4488ff', '#cc44ff', '#ff44aa', '#ffffff', '#000000'];
@@ -1350,10 +1353,53 @@
             header.appendChild(title);
             header.appendChild(doneBtn);
 
+            // Tool toggle row (Pen / Eraser)
+            const toolRow = document.createElement('div');
+            toolRow.style.cssText = `display: flex; gap: 6px;`;
+
+            const activeTool = `
+                flex: 1; border-radius: 8px; padding: 5px 0; font-size: 12px;
+                cursor: pointer; font-family: inherit; transition: background 0.15s, color 0.15s, border-color 0.15s;
+                background: #ffffff; color: #101010; border: 1.5px solid #ffffff; font-weight: 600;
+            `;
+            const inactiveTool = `
+                flex: 1; border-radius: 8px; padding: 5px 0; font-size: 12px;
+                cursor: pointer; font-family: inherit; transition: background 0.15s, color 0.15s, border-color 0.15s;
+                background: rgba(255,255,255,0.06); color: #a6adc8; border: 1.5px solid rgba(255,255,255,0.35);
+            `;
+
+            const penBtn = document.createElement('button');
+            penBtn.textContent = '✏️ Pen';
+            penBtn.style.cssText = this.currentTool === 'pen' ? activeTool : inactiveTool;
+
+            const eraserBtn = document.createElement('button');
+            eraserBtn.textContent = '⬜ Eraser';
+            eraserBtn.style.cssText = this.currentTool === 'eraser' ? activeTool : inactiveTool;
+
+            this.toolBtns = { pen: penBtn, eraser: eraserBtn };
+
+            const selectTool = (tool) => {
+                this.currentTool = tool;
+                penBtn.style.cssText = tool === 'pen' ? activeTool : inactiveTool;
+                eraserBtn.style.cssText = tool === 'eraser' ? activeTool : inactiveTool;
+                // Show/hide pen-only controls
+                penControls.style.display = tool === 'pen' ? '' : 'none';
+                eraserControls.style.display = tool === 'eraser' ? '' : 'none';
+            };
+
+            penBtn.addEventListener('click', () => selectTool('pen'));
+            eraserBtn.addEventListener('click', () => selectTool('eraser'));
+            toolRow.appendChild(penBtn);
+            toolRow.appendChild(eraserBtn);
+
+            // Pen controls (color + size) — hidden when eraser active
+            const penControls = document.createElement('div');
+            penControls.style.cssText = `display: flex; flex-direction: column; gap: 10px;`;
+
             // Color swatches
             const colorsLabel = document.createElement('div');
             colorsLabel.textContent = 'Color';
-            colorsLabel.style.cssText = `color: #585b70; font-size: 10px; font-weight: 500; letter-spacing: 0.05em; margin-top: 2px;`;
+            colorsLabel.style.cssText = `color: #585b70; font-size: 10px; font-weight: 500; letter-spacing: 0.05em;`;
             
             const colorsRow = document.createElement('div');
             colorsRow.style.cssText = `display: flex; flex-wrap: wrap; gap: 5px;`;
@@ -1382,7 +1428,7 @@
                 this.colorSwatches[color] = swatch;
             });
 
-            // Size picker
+            // Pen size picker
             const sizeLabel = document.createElement('div');
             sizeLabel.textContent = 'Size';
             sizeLabel.style.cssText = `color: #585b70; font-size: 10px; font-weight: 500; letter-spacing: 0.05em;`;
@@ -1411,6 +1457,47 @@
                 this.sizeBtns[size] = btn;
             });
 
+            penControls.appendChild(colorsLabel);
+            penControls.appendChild(colorsRow);
+            penControls.appendChild(sizeLabel);
+            penControls.appendChild(sizesRow);
+
+            // Eraser controls (size) — hidden when pen active
+            const eraserControls = document.createElement('div');
+            eraserControls.style.cssText = `display: none; flex-direction: column; gap: 10px;`;
+
+            const eraserSizeLabel = document.createElement('div');
+            eraserSizeLabel.textContent = 'Eraser Size';
+            eraserSizeLabel.style.cssText = `color: #585b70; font-size: 10px; font-weight: 500; letter-spacing: 0.05em;`;
+
+            const eraserSizes = [10, 20, 40, 70];
+            const eraserSizesRow = document.createElement('div');
+            eraserSizesRow.style.cssText = `display: flex; gap: 6px; align-items: center;`;
+            this.eraserSizeBtns = {};
+            eraserSizes.forEach(size => {
+                const btn = document.createElement('button');
+                btn.style.cssText = `
+                    width: ${8 + size / 2}px; height: ${8 + size / 2}px; border-radius: 50%;
+                    background: ${size === this.eraserSize ? 'rgba(255,255,255,0.6)' : 'rgba(255,255,255,0.15)'};
+                    border: 2px solid ${size === this.eraserSize ? '#fff' : 'rgba(255,255,255,0.2)'};
+                    cursor: pointer; flex-shrink: 0; transition: background 0.15s, border-color 0.15s;
+                `;
+                btn.addEventListener('click', () => {
+                    this.eraserSize = size;
+                    Object.values(this.eraserSizeBtns).forEach(b => {
+                        b.style.background = 'rgba(255,255,255,0.15)';
+                        b.style.borderColor = 'rgba(255,255,255,0.2)';
+                    });
+                    btn.style.background = 'rgba(255,255,255,0.6)';
+                    btn.style.borderColor = '#fff';
+                });
+                eraserSizesRow.appendChild(btn);
+                this.eraserSizeBtns[size] = btn;
+            });
+
+            eraserControls.appendChild(eraserSizeLabel);
+            eraserControls.appendChild(eraserSizesRow);
+
             // Undo + Clear buttons
             const actionsRow = document.createElement('div');
             actionsRow.style.cssText = `display: flex; gap: 6px; margin-top: 2px;`;
@@ -1421,10 +1508,9 @@
             actionsRow.appendChild(clearBtn);
 
             palette.appendChild(header);
-            palette.appendChild(colorsLabel);
-            palette.appendChild(colorsRow);
-            palette.appendChild(sizeLabel);
-            palette.appendChild(sizesRow);
+            palette.appendChild(toolRow);
+            palette.appendChild(penControls);
+            palette.appendChild(eraserControls);
             palette.appendChild(actionsRow);
 
             document.body.appendChild(palette);
@@ -1455,7 +1541,8 @@
 
             // Enable pointer events on canvas
             this.canvas.style.pointerEvents = 'all';
-            document.body.style.cursor = 'none'; // We'll use a custom cursor
+            this.canvas.style.cursor = 'none';
+            document.body.style.cursor = 'none';
 
             this.canvas.addEventListener('mousedown', this.onMouseDown);
             this.canvas.addEventListener('mousemove', this.onMouseMove);
@@ -1470,6 +1557,7 @@
             this.isActive = false;
             if (this.canvas) {
                 this.canvas.style.pointerEvents = 'none';
+                this.canvas.style.cursor = '';
                 this.canvas.removeEventListener('mousedown', this.onMouseDown);
                 this.canvas.removeEventListener('mousemove', this.onMouseMove);
                 this.canvas.removeEventListener('mouseup', this.onMouseUp);
@@ -1505,20 +1593,28 @@
         onMouseDown(e) {
             if (e.button !== 0) return;
             this.isDrawing = true;
-            this.currentStroke = {
-                color: this.currentColor,
-                size: this.currentSize,
-                points: [{ x: e.pageX, y: e.pageY }]
-            };
+            if (this.currentTool === 'pen') {
+                this.currentStroke = {
+                    color: this.currentColor,
+                    size: this.currentSize,
+                    points: [{ x: e.pageX, y: e.pageY }]
+                };
+            }
             this.drawCursor(e.pageX, e.pageY);
         }
 
         onMouseMove(e) {
-            // Redraw to show cursor dot
-            if (this.isDrawing && this.currentStroke) {
-                this.currentStroke.points.push({ x: e.pageX, y: e.pageY });
-                this.redrawAll();
-                this.drawStroke(this.currentStroke);
+            if (this.isDrawing) {
+                if (this.currentTool === 'pen' && this.currentStroke) {
+                    this.currentStroke.points.push({ x: e.pageX, y: e.pageY });
+                    this.redrawAll();
+                    this.drawStroke(this.currentStroke);
+                } else if (this.currentTool === 'eraser') {
+                    this.eraseAt(e.pageX, e.pageY);
+                    this.redrawAll();
+                } else {
+                    this.redrawAll();
+                }
             } else {
                 this.redrawAll();
             }
@@ -1526,14 +1622,16 @@
         }
 
         onMouseUp(e) {
-            if (!this.isDrawing || !this.currentStroke) return;
+            if (!this.isDrawing) return;
             this.isDrawing = false;
-            if (this.currentStroke.points.length > 1) {
-                this.strokes.push(this.currentStroke);
-                this.undoStack.push(this.strokes.length - 1);
-                this.saveDrawings();
+            if (this.currentTool === 'pen' && this.currentStroke) {
+                if (this.currentStroke.points.length > 1) {
+                    this.strokes.push(this.currentStroke);
+                    this.undoStack.push(this.strokes.length - 1);
+                    this.saveDrawings();
+                }
+                this.currentStroke = null;
             }
-            this.currentStroke = null;
             this.redrawAll();
         }
 
@@ -1541,37 +1639,87 @@
             e.preventDefault();
             const touch = e.touches[0];
             this.isDrawing = true;
-            this.currentStroke = {
-                color: this.currentColor,
-                size: this.currentSize,
-                points: [{ x: touch.pageX, y: touch.pageY }]
-            };
+            if (this.currentTool === 'pen') {
+                this.currentStroke = {
+                    color: this.currentColor,
+                    size: this.currentSize,
+                    points: [{ x: touch.pageX, y: touch.pageY }]
+                };
+            }
         }
 
         onTouchMove(e) {
             e.preventDefault();
-            if (!this.isDrawing || !this.currentStroke) return;
+            if (!this.isDrawing) return;
             const touch = e.touches[0];
-            this.currentStroke.points.push({ x: touch.pageX, y: touch.pageY });
-            this.redrawAll();
-            this.drawStroke(this.currentStroke);
+            if (this.currentTool === 'pen' && this.currentStroke) {
+                this.currentStroke.points.push({ x: touch.pageX, y: touch.pageY });
+                this.redrawAll();
+                this.drawStroke(this.currentStroke);
+            } else if (this.currentTool === 'eraser') {
+                this.eraseAt(touch.pageX, touch.pageY);
+                this.redrawAll();
+            }
         }
 
         onTouchEnd(e) {
             this.onMouseUp(e);
         }
 
+        eraseAt(px, py) {
+            const r = this.eraserSize / 2;
+            const rSq = r * r;
+            const nextStrokes = [];
+
+            this.strokes.forEach(stroke => {
+                // Split stroke into segments that don't overlap the eraser circle
+                let segment = [];
+                stroke.points.forEach(pt => {
+                    const dx = pt.x - px;
+                    const dy = pt.y - py;
+                    if (dx * dx + dy * dy > rSq) {
+                        segment.push(pt);
+                    } else {
+                        // Point is inside eraser — commit current segment if long enough
+                        if (segment.length > 1) {
+                            nextStrokes.push({ color: stroke.color, size: stroke.size, points: segment });
+                        }
+                        segment = [];
+                    }
+                });
+                if (segment.length > 1) {
+                    nextStrokes.push({ color: stroke.color, size: stroke.size, points: segment });
+                }
+            });
+
+            if (nextStrokes.length !== this.strokes.length || JSON.stringify(nextStrokes) !== JSON.stringify(this.strokes)) {
+                this.strokes = nextStrokes;
+                this.saveDrawings();
+            }
+        }
+
         drawCursor(x, y) {
             const ctx = this.ctx;
-            const r = this.currentSize / 2 + 1;
             ctx.save();
-            ctx.beginPath();
-            ctx.arc(x, y, r, 0, Math.PI * 2);
-            ctx.fillStyle = this.currentColor;
-            ctx.fill();
-            ctx.strokeStyle = 'rgba(255,255,255,0.8)';
-            ctx.lineWidth = 1.5;
-            ctx.stroke();
+            if (this.currentTool === 'eraser') {
+                const r = this.eraserSize / 2;
+                ctx.beginPath();
+                ctx.arc(x, y, r, 0, Math.PI * 2);
+                ctx.strokeStyle = 'rgba(80,80,80,0.9)';
+                ctx.lineWidth = 1.5;
+                ctx.setLineDash([3, 3]);
+                ctx.stroke();
+                ctx.setLineDash([]);
+            } else {
+                const r = this.currentSize / 2 + 1;
+                ctx.beginPath();
+                ctx.arc(x, y, r, 0, Math.PI * 2);
+                ctx.fillStyle = this.currentColor;
+                ctx.fill();
+                ctx.strokeStyle = 'rgba(255,255,255,0.8)';
+                ctx.lineWidth = 1.5;
+                ctx.stroke();
+            }
             ctx.restore();
         }
 
