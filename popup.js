@@ -3,12 +3,12 @@ document.addEventListener('DOMContentLoaded', () => {
     const emptyState = document.getElementById('empty-state');
     const currentDomainSpan = document.getElementById('current-domain');
     const saveStatusSpan = document.getElementById('save-status');
+    const drawingsToggle = document.getElementById('drawings-visible-toggle');
+    const clearDrawingsBtn = document.getElementById('clear-drawings-btn');
 
     let currentHostname = '';
     let currentNotes = [];
     let debounceTimer;
-
-
 
     // Get Current Tab Hostname
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
@@ -19,9 +19,42 @@ document.addEventListener('DOMContentLoaded', () => {
             currentHostname = url.hostname;
             currentDomainSpan.textContent = currentHostname;
             loadNotes(currentHostname);
+            loadDrawingsState(currentHostname);
         } catch (e) {
             currentDomainSpan.textContent = "Invalid Domain";
         }
+    });
+
+    // Load drawings visible state
+    function loadDrawingsState(hostname) {
+        chrome.storage.local.get([hostname], (result) => {
+            const data = result[hostname] || {};
+            const visible = data.drawingsVisible !== false; // default true
+            drawingsToggle.checked = visible;
+        });
+    }
+
+    // Drawings toggle
+    drawingsToggle.addEventListener('change', (e) => {
+        const visible = e.target.checked;
+        chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+            if (tabs[0]) {
+                chrome.tabs.sendMessage(tabs[0].id, {
+                    action: 'setDrawingsVisible',
+                    visible: visible
+                });
+            }
+        });
+    });
+
+    // Clear drawings
+    clearDrawingsBtn.addEventListener('click', () => {
+        if (!confirm('Clear all drawings on this page?')) return;
+        chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+            if (tabs[0]) {
+                chrome.tabs.sendMessage(tabs[0].id, { action: 'clearDrawings' });
+            }
+        });
     });
 
     // Load Notes

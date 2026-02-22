@@ -6,6 +6,77 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Website Notes</title>
   <link rel="stylesheet" href="popup.css">
+  <style>
+    .drawings-section {
+      margin: 12px 0 4px;
+      padding: 10px 12px;
+      background: rgba(255,255,255,0.03);
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 10px;
+    }
+    .drawings-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 8px;
+    }
+    .drawings-title {
+      font-size: 13px;
+      font-weight: 600;
+      color: #cdd6f4;
+    }
+    .toggle-switch {
+      position: relative;
+      display: inline-block;
+      width: 36px;
+      height: 20px;
+      cursor: pointer;
+    }
+    .toggle-switch input {
+      opacity: 0;
+      width: 0;
+      height: 0;
+    }
+    .toggle-switch .toggle-slider {
+      position: absolute;
+      inset: 0;
+      background: rgba(255,255,255,0.15);
+      border-radius: 20px;
+      transition: background 0.2s;
+    }
+    .toggle-switch .toggle-slider::before {
+      content: '';
+      position: absolute;
+      width: 14px;
+      height: 14px;
+      left: 3px;
+      top: 3px;
+      background: #fff;
+      border-radius: 50%;
+      transition: transform 0.2s;
+    }
+    .toggle-switch input:checked + .toggle-slider {
+      background: #89b4fa;
+    }
+    .toggle-switch input:checked + .toggle-slider::before {
+      transform: translateX(16px);
+    }
+    .clear-drawings-btn {
+      width: 100%;
+      background: rgba(243,139,168,0.08);
+      border: 1px solid rgba(243,139,168,0.2);
+      color: #f38ba8;
+      border-radius: 7px;
+      padding: 5px 10px;
+      font-size: 12px;
+      cursor: pointer;
+      font-family: inherit;
+      transition: background 0.15s;
+    }
+    .clear-drawings-btn:hover {
+      background: rgba(243,139,168,0.18);
+    }
+  </style>
 </head>
 
 <body>
@@ -24,6 +95,17 @@
 
     <div id="empty-state" class="empty-state" style="display: none;">
       <p>No notes yet. Click the annotation button at the bottom of the screen to add one!</p>
+    </div>
+
+    <div class="drawings-section">
+      <div class="drawings-header">
+        <span class="drawings-title">✏️ Drawings</span>
+        <label class="toggle-switch" title="Show/hide drawings on page">
+          <input type="checkbox" id="drawings-visible-toggle" checked>
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+      <button id="clear-drawings-btn" class="clear-drawings-btn">Clear all drawings</button>
     </div>
 
 
