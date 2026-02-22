@@ -232,7 +232,7 @@
 
             while (current && current !== document.body && depth < maxDepth) {
                 // Prefer elements with IDs, classes, or semantic tags
-                if (current.id || 
+                if (current.id ||
                     (current.className && typeof current.className === 'string' && current.className.trim()) ||
                     ['article', 'section', 'main', 'header', 'footer', 'aside', 'nav', 'div', 'p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6'].includes(current.tagName.toLowerCase())) {
                     return current;
@@ -292,7 +292,7 @@
                 });
 
                 this.createNoteAtPosition(x, y, noteData);
-                
+
                 // Notify popup that note was created
                 chrome.runtime.sendMessage({
                     action: 'noteCreated',
@@ -307,7 +307,7 @@
         createNoteAtPosition(x, y, noteData) {
             const targetElement = this.findNearestSignificantElement(x, y);
             const targetRect = targetElement.getBoundingClientRect();
-            
+
             // Calculate offset relative to target element
             const offset = {
                 x: x - targetRect.left,
@@ -824,6 +824,8 @@
             this.areaDrawingMode = false;
             this.areaStartPos = null;
             this.areaPreview = null;
+            this.highlightModeActive = false;
+            this.handleMouseUp = this.handleMouseUp.bind(this);
             this.init();
         }
 
@@ -913,6 +915,33 @@
             return true;
         }
 
+        toggleHighlightMode(active) {
+            if (active !== undefined) {
+                this.highlightModeActive = active;
+            } else {
+                this.highlightModeActive = !this.highlightModeActive;
+            }
+            if (this.highlightModeActive) {
+                document.body.classList.add('highlight-mode-active');
+                document.addEventListener('mouseup', this.handleMouseUp);
+            } else {
+                document.body.classList.remove('highlight-mode-active');
+                document.removeEventListener('mouseup', this.handleMouseUp);
+            }
+            return this.highlightModeActive;
+        }
+
+        handleMouseUp(e) {
+            if (!this.highlightModeActive) return;
+            // Short timeout to let browser selection finish updating
+            setTimeout(() => {
+                const selection = window.getSelection();
+                if (selection && selection.rangeCount > 0 && selection.toString().trim().length > 0) {
+                    this.highlightText();
+                }
+            }, 10);
+        }
+
         startAreaDrawing() {
             this.areaDrawingMode = true;
             document.body.style.cursor = 'crosshair';
@@ -928,7 +957,7 @@
                 }
 
                 this.areaStartPos = { x: e.clientX, y: e.clientY };
-                
+
                 // Create preview rectangle
                 this.areaPreview = document.createElement('div');
                 this.areaPreview.className = 'area-highlight-preview';
@@ -971,7 +1000,7 @@
                     if (width > 10 && height > 10) {
                         // Create highlight
                         const highlightId = this.generateHighlightId();
-                        const targetElement = document.elementFromPoint(left + width/2, top + height/2);
+                        const targetElement = document.elementFromPoint(left + width / 2, top + height / 2);
                         const anchorElement = targetElement || document.body;
                         const anchorRect = anchorElement.getBoundingClientRect();
 
@@ -1153,11 +1182,605 @@
         }
     }
 
+    // FreehandDrawingManager class
+    class FreehandDrawingManager {
+        constructor() {
+            this.isActive = false;
+            this.isDrawing = false;
+            this.isVisible = true;
+            this.currentTool = 'pen'; // 'pen' | 'eraser'
+            this.currentColor = '#ff4444';
+            this.currentSize = 4;
+            this.eraserSize = 20;
+            this.strokes = []; // Array of {color, size, points[]}
+            this.currentStroke = null;
+            this.canvas = null;
+            this.ctx = null;
+            this.paletteEl = null;
+            this.toolBtns = {};
+            this.undoStack = []; // For undo support
+
+            this.colors = ['#ff4444', '#ff9900', '#ffdd00', '#44cc44', '#4488ff', '#cc44ff', '#ff44aa', '#ffffff', '#000000'];
+            this.sizes = [2, 4, 8, 14];
+
+            this.onMouseDown = this.onMouseDown.bind(this);
+            this.onMouseMove = this.onMouseMove.bind(this);
+            this.onMouseUp = this.onMouseUp.bind(this);
+            this.onTouchStart = this.onTouchStart.bind(this);
+            this.onTouchMove = this.onTouchMove.bind(this);
+            this.onTouchEnd = this.onTouchEnd.bind(this);
+
+            this.init();
+        }
+
+        init() {
+            // Load saved strokes
+            chrome.storage.local.get([HOSTNAME], (result) => {
+                const data = result[HOSTNAME];
+                if (data && data.drawings && Array.isArray(data.drawings)) {
+                    this.strokes = data.drawings;
+                    // If canvas exists, render them
+                    if (this.canvas) this.redrawAll();
+                }
+            });
+
+            // Listen for storage changes (e.g. popup toggling visibility)
+            chrome.storage.onChanged.addListener((changes, area) => {
+                if (area === 'local' && changes[HOSTNAME]) {
+                    const newData = changes[HOSTNAME].newValue;
+                    if (newData && newData.drawingsVisible !== undefined) {
+                        this.isVisible = newData.drawingsVisible;
+                        if (this.canvas) {
+                            this.canvas.style.display = this.isVisible ? 'block' : 'none';
+                        }
+                    }
+                }
+            });
+
+            // Listen for messages from popup
+            chrome.runtime.onMessage.addListener((message) => {
+                if (message.action === 'setDrawingsVisible') {
+                    this.setVisible(message.visible);
+                } else if (message.action === 'clearDrawings') {
+                    this.clearAll();
+                }
+            });
+        }
+
+        createCanvas() {
+            if (this.canvas) return;
+
+            this.canvas = document.createElement('canvas');
+            this.canvas.id = '__freehand_canvas__';
+            this.canvas.style.cssText = `
+                position: absolute;
+                top: 0;
+                left: 0;
+                z-index: 2147483644;
+                pointer-events: none;
+                display: ${this.isVisible ? 'block' : 'none'};
+            `;
+            this._resizeCanvas();
+            this.ctx = this.canvas.getContext('2d', { willReadFrequently: true });
+            document.documentElement.appendChild(this.canvas);
+
+            // Handle resize — canvas must cover the full document
+            window.addEventListener('resize', () => {
+                this._resizeCanvas();
+                this.redrawAll();
+            });
+
+            // Re-check size on scroll in case page expanded (e.g. infinite scroll)
+            window.addEventListener('scroll', () => {
+                const needsResize = (
+                    document.documentElement.scrollHeight > this.canvas.height ||
+                    document.documentElement.scrollWidth > this.canvas.width
+                );
+                if (needsResize) {
+                    this._resizeCanvas();
+                    this.redrawAll();
+                }
+            }, { passive: true });
+
+            this.redrawAll();
+        }
+
+        _resizeCanvas() {
+            const w = Math.max(
+                document.body.scrollWidth, document.documentElement.scrollWidth,
+                document.body.offsetWidth, document.documentElement.offsetWidth,
+                document.body.clientWidth, document.documentElement.clientWidth
+            );
+            const h = Math.max(
+                document.body.scrollHeight, document.documentElement.scrollHeight,
+                document.body.offsetHeight, document.documentElement.offsetHeight,
+                document.body.clientHeight, document.documentElement.clientHeight
+            );
+            this.canvas.width = w;
+            this.canvas.height = h;
+            this.canvas.style.width = w + 'px';
+            this.canvas.style.height = h + 'px';
+        }
+
+        createPalette() {
+            if (this.paletteEl) {
+                this.paletteEl.style.display = 'flex';
+                return;
+            }
+
+            const palette = document.createElement('div');
+            palette.id = '__freehand_palette__';
+            palette.style.cssText = `
+                position: fixed;
+                bottom: 90px;
+                right: 18px;
+                background: rgba(15,15,16,0.95);
+                border: 1px solid rgba(255,255,255,0.15);
+                border-radius: 16px;
+                padding: 12px;
+                display: flex;
+                flex-direction: column;
+                gap: 10px;
+                z-index: 2147483647;
+                box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+                backdrop-filter: blur(8px);
+                font-family: 'Segoe UI', system-ui, sans-serif;
+                min-width: 180px;
+                cursor: default;
+                user-select: none;
+            `;
+
+            // Header
+            const header = document.createElement('div');
+            header.style.cssText = `
+                display: flex; align-items: center; justify-content: space-between;
+                margin-bottom: 2px;
+            `;
+            const title = document.createElement('span');
+            title.textContent = 'Draw';
+            title.style.cssText = `color: #a6adc8; font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase;`;
+            
+            const doneBtn = document.createElement('button');
+            doneBtn.textContent = '✕ Done';
+            doneBtn.style.cssText = `
+                background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.1);
+                color: #cdd6f4; border-radius: 8px; padding: 3px 8px; font-size: 11px;
+                cursor: pointer; font-family: inherit;
+            `;
+            doneBtn.addEventListener('click', () => this.deactivate());
+            doneBtn.addEventListener('mouseenter', () => doneBtn.style.background = 'rgba(255,255,255,0.15)');
+            doneBtn.addEventListener('mouseleave', () => doneBtn.style.background = 'rgba(255,255,255,0.08)');
+            header.appendChild(title);
+            header.appendChild(doneBtn);
+
+            // Tool toggle row (Pen / Eraser)
+            const toolRow = document.createElement('div');
+            toolRow.style.cssText = `display: flex; gap: 6px;`;
+
+            const activeTool = `
+                flex: 1; border-radius: 8px; padding: 5px 0; font-size: 12px;
+                cursor: pointer; font-family: inherit; transition: background 0.15s, color 0.15s, border-color 0.15s;
+                background: #ffffff; color: #101010; border: 1.5px solid #ffffff; font-weight: 600;
+            `;
+            const inactiveTool = `
+                flex: 1; border-radius: 8px; padding: 5px 0; font-size: 12px;
+                cursor: pointer; font-family: inherit; transition: background 0.15s, color 0.15s, border-color 0.15s;
+                background: rgba(255,255,255,0.06); color: #a6adc8; border: 1.5px solid rgba(255,255,255,0.35);
+            `;
+
+            const penBtn = document.createElement('button');
+            penBtn.textContent = '✏️ Pen';
+            penBtn.style.cssText = this.currentTool === 'pen' ? activeTool : inactiveTool;
+
+            const eraserBtn = document.createElement('button');
+            eraserBtn.textContent = '⬜ Eraser';
+            eraserBtn.style.cssText = this.currentTool === 'eraser' ? activeTool : inactiveTool;
+
+            this.toolBtns = { pen: penBtn, eraser: eraserBtn };
+
+            const selectTool = (tool) => {
+                this.currentTool = tool;
+                penBtn.style.cssText = tool === 'pen' ? activeTool : inactiveTool;
+                eraserBtn.style.cssText = tool === 'eraser' ? activeTool : inactiveTool;
+                // Show/hide pen-only controls
+                penControls.style.display = tool === 'pen' ? '' : 'none';
+                eraserControls.style.display = tool === 'eraser' ? '' : 'none';
+            };
+
+            penBtn.addEventListener('click', () => selectTool('pen'));
+            eraserBtn.addEventListener('click', () => selectTool('eraser'));
+            toolRow.appendChild(penBtn);
+            toolRow.appendChild(eraserBtn);
+
+            // Pen controls (color + size) — hidden when eraser active
+            const penControls = document.createElement('div');
+            penControls.style.cssText = `display: flex; flex-direction: column; gap: 10px;`;
+
+            // Color swatches
+            const colorsLabel = document.createElement('div');
+            colorsLabel.textContent = 'Color';
+            colorsLabel.style.cssText = `color: #585b70; font-size: 10px; font-weight: 500; letter-spacing: 0.05em;`;
+            
+            const colorsRow = document.createElement('div');
+            colorsRow.style.cssText = `display: flex; flex-wrap: wrap; gap: 5px;`;
+            this.colorSwatches = {};
+            this.colors.forEach(color => {
+                const swatch = document.createElement('button');
+                swatch.style.cssText = `
+                    width: 22px; height: 22px; border-radius: 50%; background: ${color};
+                    border: 2px solid transparent; cursor: pointer; flex-shrink: 0;
+                    transition: transform 0.15s, border-color 0.15s;
+                `;
+                if (color === this.currentColor) {
+                    swatch.style.borderColor = '#fff';
+                    swatch.style.transform = 'scale(1.2)';
+                }
+                swatch.addEventListener('click', () => {
+                    this.currentColor = color;
+                    Object.values(this.colorSwatches).forEach(s => {
+                        s.style.borderColor = 'transparent';
+                        s.style.transform = 'scale(1)';
+                    });
+                    swatch.style.borderColor = '#fff';
+                    swatch.style.transform = 'scale(1.2)';
+                });
+                colorsRow.appendChild(swatch);
+                this.colorSwatches[color] = swatch;
+            });
+
+            // Pen size picker
+            const sizeLabel = document.createElement('div');
+            sizeLabel.textContent = 'Size';
+            sizeLabel.style.cssText = `color: #585b70; font-size: 10px; font-weight: 500; letter-spacing: 0.05em;`;
+
+            const sizesRow = document.createElement('div');
+            sizesRow.style.cssText = `display: flex; gap: 6px; align-items: center;`;
+            this.sizeBtns = {};
+            this.sizes.forEach(size => {
+                const btn = document.createElement('button');
+                btn.style.cssText = `
+                    width: ${10 + size * 2}px; height: ${10 + size * 2}px; border-radius: 50%;
+                    background: ${size === this.currentSize ? '#fff' : 'rgba(255,255,255,0.3)'};
+                    border: 2px solid ${size === this.currentSize ? '#fff' : 'rgba(255,255,255,0.2)'};
+                    cursor: pointer; flex-shrink: 0; transition: background 0.15s, border-color 0.15s;
+                `;
+                btn.addEventListener('click', () => {
+                    this.currentSize = size;
+                    Object.values(this.sizeBtns).forEach(b => {
+                        b.style.background = 'rgba(255,255,255,0.3)';
+                        b.style.borderColor = 'rgba(255,255,255,0.2)';
+                    });
+                    btn.style.background = '#fff';
+                    btn.style.borderColor = '#fff';
+                });
+                sizesRow.appendChild(btn);
+                this.sizeBtns[size] = btn;
+            });
+
+            penControls.appendChild(colorsLabel);
+            penControls.appendChild(colorsRow);
+            penControls.appendChild(sizeLabel);
+            penControls.appendChild(sizesRow);
+
+            // Eraser controls (size) — hidden when pen active
+            const eraserControls = document.createElement('div');
+            eraserControls.style.cssText = `display: none; flex-direction: column; gap: 10px;`;
+
+            const eraserSizeLabel = document.createElement('div');
+            eraserSizeLabel.textContent = 'Eraser Size';
+            eraserSizeLabel.style.cssText = `color: #585b70; font-size: 10px; font-weight: 500; letter-spacing: 0.05em;`;
+
+            const eraserSizes = [10, 20, 40, 70];
+            const eraserSizesRow = document.createElement('div');
+            eraserSizesRow.style.cssText = `display: flex; gap: 6px; align-items: center;`;
+            this.eraserSizeBtns = {};
+            eraserSizes.forEach(size => {
+                const btn = document.createElement('button');
+                btn.style.cssText = `
+                    width: ${8 + size / 2}px; height: ${8 + size / 2}px; border-radius: 50%;
+                    background: ${size === this.eraserSize ? 'rgba(255,255,255,0.6)' : 'rgba(255,255,255,0.15)'};
+                    border: 2px solid ${size === this.eraserSize ? '#fff' : 'rgba(255,255,255,0.2)'};
+                    cursor: pointer; flex-shrink: 0; transition: background 0.15s, border-color 0.15s;
+                `;
+                btn.addEventListener('click', () => {
+                    this.eraserSize = size;
+                    Object.values(this.eraserSizeBtns).forEach(b => {
+                        b.style.background = 'rgba(255,255,255,0.15)';
+                        b.style.borderColor = 'rgba(255,255,255,0.2)';
+                    });
+                    btn.style.background = 'rgba(255,255,255,0.6)';
+                    btn.style.borderColor = '#fff';
+                });
+                eraserSizesRow.appendChild(btn);
+                this.eraserSizeBtns[size] = btn;
+            });
+
+            eraserControls.appendChild(eraserSizeLabel);
+            eraserControls.appendChild(eraserSizesRow);
+
+            // Undo + Clear buttons
+            const actionsRow = document.createElement('div');
+            actionsRow.style.cssText = `display: flex; gap: 6px; margin-top: 2px;`;
+            
+            const undoBtn = this._makeActionBtn('↩ Undo', () => this.undo());
+            const clearBtn = this._makeActionBtn('✕ Clear', () => this.clearAll(), '#f38ba8');
+            actionsRow.appendChild(undoBtn);
+            actionsRow.appendChild(clearBtn);
+
+            palette.appendChild(header);
+            palette.appendChild(toolRow);
+            palette.appendChild(penControls);
+            palette.appendChild(eraserControls);
+            palette.appendChild(actionsRow);
+
+            document.body.appendChild(palette);
+            this.paletteEl = palette;
+
+            // Prevent palette clicks from propagating to canvas
+            palette.addEventListener('mousedown', e => e.stopPropagation());
+        }
+
+        _makeActionBtn(text, onClick, hoverColor = '#89b4fa') {
+            const btn = document.createElement('button');
+            btn.textContent = text;
+            btn.style.cssText = `
+                flex: 1; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.1);
+                color: #cdd6f4; border-radius: 8px; padding: 5px 0; font-size: 11px;
+                cursor: pointer; font-family: inherit; transition: background 0.15s, color 0.15s;
+            `;
+            btn.addEventListener('click', onClick);
+            btn.addEventListener('mouseenter', () => { btn.style.color = hoverColor; btn.style.background = 'rgba(255,255,255,0.12)'; });
+            btn.addEventListener('mouseleave', () => { btn.style.color = '#cdd6f4'; btn.style.background = 'rgba(255,255,255,0.06)'; });
+            return btn;
+        }
+
+        activate() {
+            this.isActive = true;
+            this.createCanvas();
+            this.createPalette();
+
+            // Enable pointer events on canvas
+            this.canvas.style.pointerEvents = 'all';
+            this.canvas.style.cursor = 'none';
+            document.body.style.cursor = 'none';
+
+            this.canvas.addEventListener('mousedown', this.onMouseDown);
+            this.canvas.addEventListener('mousemove', this.onMouseMove);
+            this.canvas.addEventListener('mouseup', this.onMouseUp);
+            this.canvas.addEventListener('mouseleave', this.onMouseUp);
+            this.canvas.addEventListener('touchstart', this.onTouchStart, { passive: false });
+            this.canvas.addEventListener('touchmove', this.onTouchMove, { passive: false });
+            this.canvas.addEventListener('touchend', this.onTouchEnd);
+        }
+
+        deactivate() {
+            this.isActive = false;
+            if (this.canvas) {
+                this.canvas.style.pointerEvents = 'none';
+                this.canvas.style.cursor = '';
+                this.canvas.removeEventListener('mousedown', this.onMouseDown);
+                this.canvas.removeEventListener('mousemove', this.onMouseMove);
+                this.canvas.removeEventListener('mouseup', this.onMouseUp);
+                this.canvas.removeEventListener('mouseleave', this.onMouseUp);
+                this.canvas.removeEventListener('touchstart', this.onTouchStart);
+                this.canvas.removeEventListener('touchmove', this.onTouchMove);
+                this.canvas.removeEventListener('touchend', this.onTouchEnd);
+                // Redraw without cursor
+                this.redrawAll();
+            }
+            if (this.paletteEl) {
+                this.paletteEl.style.display = 'none';
+            }
+            document.body.style.cursor = '';
+
+            // Notify FloatingToolbarManager to update button state
+            window.dispatchEvent(new CustomEvent('freehand-deactivated'));
+        }
+
+        setVisible(visible) {
+            this.isVisible = visible;
+            if (this.canvas) {
+                this.canvas.style.display = visible ? 'block' : 'none';
+            }
+            // Persist
+            chrome.storage.local.get([HOSTNAME], (result) => {
+                const data = result[HOSTNAME] || {};
+                data.drawingsVisible = visible;
+                chrome.storage.local.set({ [HOSTNAME]: data });
+            });
+        }
+
+        onMouseDown(e) {
+            if (e.button !== 0) return;
+            this.isDrawing = true;
+            if (this.currentTool === 'pen') {
+                this.currentStroke = {
+                    color: this.currentColor,
+                    size: this.currentSize,
+                    points: [{ x: e.pageX, y: e.pageY }]
+                };
+            }
+            this.drawCursor(e.pageX, e.pageY);
+        }
+
+        onMouseMove(e) {
+            if (this.isDrawing) {
+                if (this.currentTool === 'pen' && this.currentStroke) {
+                    this.currentStroke.points.push({ x: e.pageX, y: e.pageY });
+                    this.redrawAll();
+                    this.drawStroke(this.currentStroke);
+                } else if (this.currentTool === 'eraser') {
+                    this.eraseAt(e.pageX, e.pageY);
+                    this.redrawAll();
+                } else {
+                    this.redrawAll();
+                }
+            } else {
+                this.redrawAll();
+            }
+            this.drawCursor(e.pageX, e.pageY);
+        }
+
+        onMouseUp(e) {
+            if (!this.isDrawing) return;
+            this.isDrawing = false;
+            if (this.currentTool === 'pen' && this.currentStroke) {
+                if (this.currentStroke.points.length > 1) {
+                    this.strokes.push(this.currentStroke);
+                    this.undoStack.push(this.strokes.length - 1);
+                    this.saveDrawings();
+                }
+                this.currentStroke = null;
+            }
+            this.redrawAll();
+        }
+
+        onTouchStart(e) {
+            e.preventDefault();
+            const touch = e.touches[0];
+            this.isDrawing = true;
+            if (this.currentTool === 'pen') {
+                this.currentStroke = {
+                    color: this.currentColor,
+                    size: this.currentSize,
+                    points: [{ x: touch.pageX, y: touch.pageY }]
+                };
+            }
+        }
+
+        onTouchMove(e) {
+            e.preventDefault();
+            if (!this.isDrawing) return;
+            const touch = e.touches[0];
+            if (this.currentTool === 'pen' && this.currentStroke) {
+                this.currentStroke.points.push({ x: touch.pageX, y: touch.pageY });
+                this.redrawAll();
+                this.drawStroke(this.currentStroke);
+            } else if (this.currentTool === 'eraser') {
+                this.eraseAt(touch.pageX, touch.pageY);
+                this.redrawAll();
+            }
+        }
+
+        onTouchEnd(e) {
+            this.onMouseUp(e);
+        }
+
+        eraseAt(px, py) {
+            const r = this.eraserSize / 2;
+            const rSq = r * r;
+            const nextStrokes = [];
+
+            this.strokes.forEach(stroke => {
+                // Split stroke into segments that don't overlap the eraser circle
+                let segment = [];
+                stroke.points.forEach(pt => {
+                    const dx = pt.x - px;
+                    const dy = pt.y - py;
+                    if (dx * dx + dy * dy > rSq) {
+                        segment.push(pt);
+                    } else {
+                        // Point is inside eraser — commit current segment if long enough
+                        if (segment.length > 1) {
+                            nextStrokes.push({ color: stroke.color, size: stroke.size, points: segment });
+                        }
+                        segment = [];
+                    }
+                });
+                if (segment.length > 1) {
+                    nextStrokes.push({ color: stroke.color, size: stroke.size, points: segment });
+                }
+            });
+
+            if (nextStrokes.length !== this.strokes.length || JSON.stringify(nextStrokes) !== JSON.stringify(this.strokes)) {
+                this.strokes = nextStrokes;
+                this.saveDrawings();
+            }
+        }
+
+        drawCursor(x, y) {
+            const ctx = this.ctx;
+            ctx.save();
+            if (this.currentTool === 'eraser') {
+                const r = this.eraserSize / 2;
+                ctx.beginPath();
+                ctx.arc(x, y, r, 0, Math.PI * 2);
+                ctx.strokeStyle = 'rgba(80,80,80,0.9)';
+                ctx.lineWidth = 1.5;
+                ctx.setLineDash([3, 3]);
+                ctx.stroke();
+                ctx.setLineDash([]);
+            } else {
+                const r = this.currentSize / 2 + 1;
+                ctx.beginPath();
+                ctx.arc(x, y, r, 0, Math.PI * 2);
+                ctx.fillStyle = this.currentColor;
+                ctx.fill();
+                ctx.strokeStyle = 'rgba(255,255,255,0.8)';
+                ctx.lineWidth = 1.5;
+                ctx.stroke();
+            }
+            ctx.restore();
+        }
+
+        drawStroke(stroke) {
+            if (!stroke || stroke.points.length < 2) return;
+            const ctx = this.ctx;
+            ctx.save();
+            ctx.globalCompositeOperation = 'source-over';
+            ctx.strokeStyle = stroke.color;
+            ctx.lineWidth = stroke.size;
+            ctx.lineCap = 'round';
+            ctx.lineJoin = 'round';
+            ctx.globalAlpha = 0.85;
+            ctx.beginPath();
+            ctx.moveTo(stroke.points[0].x, stroke.points[0].y);
+            for (let i = 1; i < stroke.points.length - 1; i++) {
+                const midX = (stroke.points[i].x + stroke.points[i + 1].x) / 2;
+                const midY = (stroke.points[i].y + stroke.points[i + 1].y) / 2;
+                ctx.quadraticCurveTo(stroke.points[i].x, stroke.points[i].y, midX, midY);
+            }
+            const last = stroke.points[stroke.points.length - 1];
+            ctx.lineTo(last.x, last.y);
+            ctx.stroke();
+            ctx.restore();
+        }
+
+        redrawAll() {
+            if (!this.ctx || !this.canvas) return;
+            this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+            this.strokes.forEach(stroke => this.drawStroke(stroke));
+        }
+
+        undo() {
+            if (this.strokes.length === 0) return;
+            this.strokes.pop();
+            this.redrawAll();
+            this.saveDrawings();
+        }
+
+        clearAll() {
+            this.strokes = [];
+            this.undoStack = [];
+            this.redrawAll();
+            this.saveDrawings();
+        }
+
+        saveDrawings() {
+            chrome.storage.local.get([HOSTNAME], (result) => {
+                const data = result[HOSTNAME] || {};
+                data.drawings = this.strokes;
+                chrome.storage.local.set({ [HOSTNAME]: data });
+            });
+        }
+    }
+
     // FloatingToolbarManager class
     class FloatingToolbarManager {
-        constructor(noteManager, highlightManager) {
+        constructor(noteManager, highlightManager, freehandDrawingManager) {
             this.noteManager = noteManager;
             this.highlightManager = highlightManager;
+            this.freehandDrawingManager = freehandDrawingManager;
             this.container = null;
             this.shadowRoot = null;
             this.shell = null;
@@ -1263,10 +1886,18 @@
                 }
 
                 if (action === 'highlight') {
-                    // Placeholder: icon is visible but action wiring is deferred.
-                    this.pinnedOpen = false;
-                    this.hoverActive = false;
-                    this.updateOpenState();
+                    const highlightBtn = button;
+                    if (this.freehandDrawingManager.isActive) {
+                        this.freehandDrawingManager.deactivate();
+                        highlightBtn.classList.remove('active');
+                    } else {
+                        this.freehandDrawingManager.activate();
+                        highlightBtn.classList.add('active');
+                        this.pinnedOpen = false;
+                        this.hoverActive = false;
+                        this.updateOpenState();
+                    }
+                    return;
                 }
             });
 
@@ -1292,6 +1923,12 @@
                     this.startDrag(e);
                 });
             }
+
+            // Listen for freehand deactivation (e.g. from Done button in palette)
+            window.addEventListener('freehand-deactivated', () => {
+                const highlightBtn = this.shell.querySelector('.annotation-fab-action-highlight');
+                if (highlightBtn) highlightBtn.classList.remove('active');
+            });
         }
 
         startNotePlacement() {
@@ -1387,7 +2024,10 @@
     // Initialize HighlightManager
     const highlightManager = new HighlightManager();
 
+    // Initialize FreehandDrawingManager
+    const freehandDrawingManager = new FreehandDrawingManager();
+
     // Initialize FloatingToolbarManager
-    const floatingToolbarManager = new FloatingToolbarManager(noteManager, highlightManager);
+    const floatingToolbarManager = new FloatingToolbarManager(noteManager, highlightManager, freehandDrawingManager);
 
 })();
