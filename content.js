@@ -232,7 +232,7 @@
 
             while (current && current !== document.body && depth < maxDepth) {
                 // Prefer elements with IDs, classes, or semantic tags
-                if (current.id || 
+                if (current.id ||
                     (current.className && typeof current.className === 'string' && current.className.trim()) ||
                     ['article', 'section', 'main', 'header', 'footer', 'aside', 'nav', 'div', 'p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6'].includes(current.tagName.toLowerCase())) {
                     return current;
@@ -292,7 +292,7 @@
                 });
 
                 this.createNoteAtPosition(x, y, noteData);
-                
+
                 // Notify popup that note was created
                 chrome.runtime.sendMessage({
                     action: 'noteCreated',
@@ -307,7 +307,7 @@
         createNoteAtPosition(x, y, noteData) {
             const targetElement = this.findNearestSignificantElement(x, y);
             const targetRect = targetElement.getBoundingClientRect();
-            
+
             // Calculate offset relative to target element
             const offset = {
                 x: x - targetRect.left,
@@ -824,6 +824,8 @@
             this.areaDrawingMode = false;
             this.areaStartPos = null;
             this.areaPreview = null;
+            this.highlightModeActive = false;
+            this.handleMouseUp = this.handleMouseUp.bind(this);
             this.init();
         }
 
@@ -913,6 +915,33 @@
             return true;
         }
 
+        toggleHighlightMode(active) {
+            if (active !== undefined) {
+                this.highlightModeActive = active;
+            } else {
+                this.highlightModeActive = !this.highlightModeActive;
+            }
+            if (this.highlightModeActive) {
+                document.body.classList.add('highlight-mode-active');
+                document.addEventListener('mouseup', this.handleMouseUp);
+            } else {
+                document.body.classList.remove('highlight-mode-active');
+                document.removeEventListener('mouseup', this.handleMouseUp);
+            }
+            return this.highlightModeActive;
+        }
+
+        handleMouseUp(e) {
+            if (!this.highlightModeActive) return;
+            // Short timeout to let browser selection finish updating
+            setTimeout(() => {
+                const selection = window.getSelection();
+                if (selection && selection.rangeCount > 0 && selection.toString().trim().length > 0) {
+                    this.highlightText();
+                }
+            }, 10);
+        }
+
         startAreaDrawing() {
             this.areaDrawingMode = true;
             document.body.style.cursor = 'crosshair';
@@ -928,7 +957,7 @@
                 }
 
                 this.areaStartPos = { x: e.clientX, y: e.clientY };
-                
+
                 // Create preview rectangle
                 this.areaPreview = document.createElement('div');
                 this.areaPreview.className = 'area-highlight-preview';
@@ -971,7 +1000,7 @@
                     if (width > 10 && height > 10) {
                         // Create highlight
                         const highlightId = this.generateHighlightId();
-                        const targetElement = document.elementFromPoint(left + width/2, top + height/2);
+                        const targetElement = document.elementFromPoint(left + width / 2, top + height / 2);
                         const anchorElement = targetElement || document.body;
                         const anchorRect = anchorElement.getBoundingClientRect();
 
@@ -1263,10 +1292,16 @@
                 }
 
                 if (action === 'highlight') {
-                    // Placeholder: icon is visible but action wiring is deferred.
+                    const isActive = this.highlightManager.toggleHighlightMode();
+                    if (isActive) {
+                        button.classList.add('active');
+                    } else {
+                        button.classList.remove('active');
+                    }
                     this.pinnedOpen = false;
                     this.hoverActive = false;
                     this.updateOpenState();
+                    return;
                 }
             });
 
